@@ -182,11 +182,48 @@ func (n *layerNode[K]) replenish(m int, dist DistanceFunc) {
 				continue
 			}
 			n.addNeighbor(candidate, m, dist)
+			// addNeighbor records only n -> candidate. Without the reverse
+			// edge the graph becomes directed: n keeps outgoing edges while
+			// no neighbour points back at it, so no search path can ever
+			// arrive at it even though it is present in the layer. Eviction
+			// deletes both directions, so a node whose whole neighbourhood
+			// was evicted drifts into exactly this state and is silently
+			// lost. Restore the backlink, evicting the candidate's worst
+			// neighbour directly: calling addNeighbor here would evict, which
+			// calls replenish, and recurse without bound.
+			n.linkBack(candidate, m, dist)
 			if len(n.neighbors) >= m {
 				return
 			}
 		}
 	}
+}
+
+// linkBack adds the reverse of n -> to, keeping the base-layer invariant that
+// a neighbor set is symmetric. It is separate from addNeighbor because
+// addNeighbor's eviction path calls replenish, which would recurse.
+func (n *layerNode[K]) linkBack(to *layerNode[K], m int, dist DistanceFunc) {
+	if _, ok := to.neighbors[n.Key]; ok {
+		return
+	}
+	if to.neighbors == nil {
+		to.neighbors = make(map[K]*layerNode[K], m)
+	}
+	if len(to.neighbors) >= m {
+		worstDist := float32(math.Inf(-1))
+		var worst *layerNode[K]
+		for _, neighbor := range to.neighbors {
+			d := dist(neighbor.Value, to.Value)
+			if d > worstDist || worst == nil {
+				worstDist, worst = d, neighbor
+			}
+		}
+		if worst != nil {
+			delete(to.neighbors, worst.Key)
+			delete(worst.neighbors, to.Key)
+		}
+	}
+	to.neighbors[n.Key] = n
 }
 
 // isolates remove the node from the graph by removing all connections

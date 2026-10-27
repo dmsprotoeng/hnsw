@@ -153,11 +153,19 @@ func TestGraph_AddDelete(t *testing.T) {
 
 	postDeleteConnectivity := an.Connectivity()
 
-	// Connectivity should be the same for the lowest layer.
-	require.Equal(
-		t, preDeleteConnectivity[0],
-		postDeleteConnectivity[0],
-	)
+	// Deleting nodes costs some edges in the lowest layer, but it must not
+	// collapse it. This used to assert equality with the pre-delete value,
+	// which only held because replenish() kept the out-degree pinned to M by
+	// writing edges in one direction only: average out-degree looked perfect
+	// while a third of the remaining edges had no reverse and a third of the
+	// nodes could no longer be reached by a search.
+	require.GreaterOrEqual(t, postDeleteConnectivity[0], preDeleteConnectivity[0]*0.75,
+		"connectivity collapsed: %v -> %v", preDeleteConnectivity, postDeleteConnectivity)
+
+	// The property that matters: every remaining node can still be arrived at.
+	for key := range g.layers[0].nodes {
+		require.NotZerof(t, inDegree(g, key), "node %v has no incoming edge and is unreachable", key)
+	}
 
 	t.Run("DeleteNotFound", func(t *testing.T) {
 		ok := g.Delete(-1)
